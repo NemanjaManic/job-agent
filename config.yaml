@@ -1,0 +1,46 @@
+# config.yaml — filteri i podešavanja agenta.
+# Menja se ovaj fajl kad želiš da promeniš ponašanje agenta, ne kod.
+
+profile:
+  # Kratak opis profila za LLM rangiranje (Faza 2) — dopuniti kasnije.
+  summary: ""
+  skills: []
+  target_roles:
+    - "Junior AI Engineer"
+    - "Junior ML Engineer"
+    - "AI/ML Internship"
+    - "Machine Learning Intern"
+
+filters:
+  seniority: ["junior", "intern", "entry level", "no experience required"]
+  locations:
+    - "Serbia"
+    - "Remote"
+  # Sloj 1 (širok filter) — vidi PLAN.md sekcija 3.1. Namerno bez negative_keywords za sada.
+  positive_keywords:
+    - "AI"
+    - "machine learning"
+    - "ML"
+    - "data"
+    - "python"
+    - "praksa"
+    - "internship"
+    - "junior"
+  negative_keywords: []
+
+sources:
+  # Popunjava se u Fazi 0.5 nakon izviđanja izvora (PLAN.md sekcija 5).
+  enabled: []
+
+llm:
+  enabled: false  # uključuje se u Fazi 2
+  score_threshold: 6
+
+notifications:
+  telegram:
+    enabled: true
+  email_fallback:
+    enabled: false  # uključuje se u Fazi 3
+
+run:
+  dry_run: true  # ne menjati na false dok slanje nije ručno testirano (PLAN.md sekcija 6)
