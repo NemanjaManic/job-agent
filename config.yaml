@@ -29,8 +29,42 @@ filters:
   negative_keywords: []
 
 sources:
-  # Popunjava se u Fazi 0.5 nakon izviđanja izvora (PLAN.md sekcija 5).
-  enabled: []
+  # Rezultat izviđanja iz Faze 0.5 (PLAN.md sekcija 5). Redosled = redosled implementacije.
+  enabled:
+    - id: remoteok
+      method: api
+      phase: 1
+    - id: weworkremotely
+      method: rss
+      phase: 2
+    - id: helloworld_rs
+      method: scraping
+      phase: 2b
+    - id: infostud_it_beograd
+      method: scraping
+      phase: 2b
+      note: "samo kategorijske stranice (npr. /oglasi-za-posao-it/*), NIKAD /search/* — blokirano robots.txt-om"
+    - id: linkedin_indeed_job_alerts
+      method: email_imap
+      phase: 3
+    - id: serpapi_google_jobs
+      method: api
+      phase: 3
+      note: "testirati sa pravim API ključem pre uključivanja — pokrivenost za Srbiju nije potvrđena"
+  # Čekaju ručnu proveru korisnika pre odluke (PLAN.md sekcija 5):
+  pending_review:
+    - id: startit_rs
+      note: "automatska provera dala nekonzistentne rezultate, treba potvrditi tačan URL poslovi sekcije"
+    - id: ai_jobs_net_foorilla
+      note: "domen ai-jobs.net sad redirect-uje na foorilla.com, API uslovi nisu bili dostupni automatskom proverom"
+  # Isključeno — robots.txt blokira baš pretragu/filtere (PLAN.md sekcija 5):
+  excluded:
+    - id: djinni
+      reason: "robots.txt blokira /q i /jobs2"
+    - id: wellfound
+      reason: "robots.txt blokira /search, /jobs/applications, /jobs/signup"
+    - id: nofluffjobs
+      reason: "nema zvaničnog javnog API-ja, direktan pristup blokiran"
 
 llm:
   enabled: false  # uključuje se u Fazi 2

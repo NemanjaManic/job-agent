@@ -162,27 +162,31 @@ Odbačene čuvamo da se ne procesiraju ponovo sutra (štedi LLM pozive) i da mo�
 
 ---
 
-## 5. Faza 0.5 — Izviđanje izvora (radi se pre koda)
-
-Ovo je najvažniji dodatak planu. Bez ovoga se gradi 9 adaptera od kojih pola nema šta da vrati.
-
-Ručno, u browseru, **bez pisanja koda** (~1–2h). Za svaki izvor iz sekcije 3 popuniti tabelu:
-
-| Izvor | Ima RSS? | Ima API? | robots.txt dozvoljava? | Broj relevantnih oglasa u poslednjih 30 dana | Odluka |
-|---|---|---|---|---|---|
+## 5. Faza 0.5 — Izviđanje izvora (urađeno)
 
 "Relevantnih" = junior/intern AI, ML, data ili Python pozicija, Srbija ili remote otvoren za Srbiju.
 
-Pravilo odluke:
-- **0–2 oglasa za 30 dana** → izvor se preskače, bez obzira koliko je tehnički lak.
-- **Ima API/RSS i ≥3 oglasa** → implementira se.
-- **Samo scraping i ≥5 oglasa** → implementira se, ali kasnije (Faza 2b).
+Pravilo odluke: 0–2 oglasa/30 dana → preskoči; API/RSS + ≥3 → implementira se; samo scraping + ≥5 → implementira se, ali kasnije (Faza 2b); robots.txt blokira baš pretragu/filtere → preskoči bez obzira na sve ostalo.
 
-Takođe u ovoj fazi:
-- Proveriti da li **Google Jobs / SerpApi** uopšte vraća smislene rezultate za "junior machine learning Serbia" i slične upite, i koliki je aktuelan besplatni limit. Ako je pokrivenost slaba → SerpApi ispada iz plana, ostaje samo parsiranje job alert mejlova.
-- Podesiti LinkedIn i Indeed job alerte na poseban mejl (kreće da skuplja podatke odmah, dok se agent gradi).
+> **Napomena o metodu:** ovu tabelu je popunio asistent alatima (WebFetch/WebSearch — provera robots.txt, RSS/API endpoint-a i trenutnog sadržaja stranica) umesto ručnog browsovanja, da se uštedi vreme. Dva reda su ostala neizvesna i traže tvoju ručnu proveru u browseru pre nego što se implementiraju (označeno ispod).
 
-Rezultat faze: konačna lista izvora sa redosledom implementacije, upisana u `config.yaml`.
+| Izvor | Ima RSS? | Ima API? | robots.txt dozvoljava? | Nalaz (~30 dana) | Odluka |
+|---|---|---|---|---|---|
+| **RemoteOK** | – | ✅ `remoteok.com/api`, bez auth-a, potvrđeno radi (testirano plain curl-om) | Da (API nije blokiran; napomena: robots.txt eksplicitno blokira AI-crawlere poput ClaudeBot-a — nebitno za naš skript jer koristi običan HTTP klijent, ne AI-agent UA) | Veliki, aktivan feed; AI/data tagovi prisutni (npr. "AI Response Analyst") | **Implementira se — Faza 1 (MVP)**. ToS traži: ako se rezultati ikad javno prikažu (npr. Faza 5 dashboard), obavezan backlink ka RemoteOK. Za privatni Telegram digest nije relevantno. |
+| **WeWorkRemotely** | ✅ RSS po kategoriji, potvrđeno radi (`/categories/remote-programming-jobs.rss`) | – | Da | 10 uzorkovanih: 1 eksplicitno junior, nekoliko AI/ML (uglavnom senior) | **Implementira se — Faza 2**. Nizak trud (RSS), povremeni pogodak; filter mora biti strog jer je većina senior. |
+| **HelloWorld.rs** | Nije nađen | Nije nađen | Da (nema blokade na oglase) | Ima namensku **"Prakse" kategoriju (3 oglasa)** + filter junior/intermediate/senior; ~10+ oglasa pominje AI/Data/Python od ukupno 30 prikazanih | **Implementira se — Faza 2b** (scraping). Najbolji lokalni izvor zbog ugrađenog junior/praksa filtera — lakše targetirati nego generičku listu. |
+| **poslovi.infostud.com** | Blokiran robots.txt-om (`Disallow: /rss_feed/*`) | Nema | **Delimično** — `/search/*` je blokiran (ne sme se scrape-ovati pretraga), ali kategorijske stranice kao `/oglasi-za-posao-it/beograd` **nisu** blokirane | IT kategorija (Beograd): 101 oglas, 9+ pominje AI/Data/Python/ML, samo 1 eksplicitno junior. ("Poslovi za mlade" je odvojena sekcija sa 738 oglasa ali skoro isključivo ne-IT — retail/hospitality, **ne koristi se**.) | **Implementira se — Faza 2b** (scraping kategorijskih stranica, ne search endpoint-a). Najveći izvor po zapremini, ali nizak junior signal — LLM sloj (sekcija 3.1) će nositi glavni teret filtriranja ovde. |
+| **Djinni.co** | Nejasno | Nejasno | **Ne** — robots.txt blokira baš `/q` (search/query) i `/jobs2`, tj. tačno ono što nam treba | Nije mereno (blokirano pravilom odluke pre merenja) | **Preskače se.** robots.txt eksplicitno zabranjuje pristup pretrazi. |
+| **Wellfound** | Nema | Zahteva partnerstvo | **Ne** — blokira `/search`, `/jobs/applications`, `/jobs/signup` i filter-parametre (`role`, `jobId`, `jobSlug`) | Nije mereno | **Preskače se.** Isti razlog kao Djinni — blokirano baš ono što treba. |
+| **NoFluffJobs** | Nema | **Nema zvaničnog javnog API-ja** — postoje samo nezvanični/plaćeni scraperi (Apify i sl.), van naše ToS-tolerancije | Sajt aktivno blokira automatizovan pristup (fetch je odbijen) | Nije mereno | **Preskače se.** |
+| **ai-jobs.net (sad "Foorilla")** | Nejasno | Postoji link `/api/list/`, ali sadržaj/uslovi nisu bili dostupni automatskom proverom (izgleda kao JS-rendered stranica) | Domen je 301-redirect na `foorilla.com` u celini | Nije mereno | **⚠️ Neizvesno — treba tvoja ručna provera** u browseru: otvori `foorilla.com/api/list/`, proveri da li je API besplatan/otvoren i da li pokriva junior/AI/data pozicije za Srbiju/remote. Javi nalaz pa odlučujemo. |
+| **Startit.rs** | Nejasno | Nema | Da (nema blokade) | **Nekonzistentno** — automatska provera je dala kontradiktorne rezultate (jedna stranica vratila nepovezane oglase, druga 404). Tačna URL struktura poslovi sekcije nije pouzdano utvrđena alatima. | **⚠️ Neizvesno — treba tvoja ručna provera.** Otvori startit.rs u browseru, nađi njihovu "Poslovi" sekciju, javi tačan URL i da li ima junior/AI/praksa oglasa — pa odlučujemo. |
+| **LinkedIn / Indeed** | – | Zatvoreno za obične korisnike | ToS zabranjuje scraping | – | **Job alert mejlovi = primarni metod (Faza 3)**, ne scraping. |
+| **SerpApi (Google Jobs)** | – | ✅ Postoji zvaničan `engine=google_jobs` endpoint, potvrđeno dokumentacijom | – (legitiman API, ne scraping) | Free tier: **250 pretraga/mesec, 50/h throughput** — dovoljno za 1x dnevno par upita. **Pokrivenost za Srbiju nije testirana** (treba pravi API ključ) | **Sekundarna opcija — testirati sa pravim ključem u Fazi 3.** Tehnički postoji i dostupan je; ne odbacuje se, ali se ne implementira pre job alert mejlova. |
+
+**Zaključak Faze 0.5:** redosled implementacije izvora — **Faza 1:** RemoteOK. **Faza 2:** WeWorkRemotely (RSS). **Faza 2b:** HelloWorld.rs + Infostud (scraping, uz jak LLM filter za Infostud). **Faza 3:** LinkedIn/Indeed preko job alert mejlova, SerpApi kao test. Djinni, Wellfound, NoFluffJobs otpadaju (robots.txt/nedostupnost). Startit.rs i Foorilla/ai-jobs.net čekaju tvoju ručnu proveru pre finalne odluke.
+
+Preostalo za tebe pre Faze 1: podesiti LinkedIn i Indeed job alerte na poseban mejl (počinje da skuplja podatke odmah, dok se agent gradi).
 
 ---
 
