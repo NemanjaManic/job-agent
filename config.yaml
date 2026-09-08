@@ -77,4 +77,4 @@ notifications:
     enabled: false  # uključuje se u Fazi 3
 
 run:
-  dry_run: true  # ne menjati na false dok slanje nije ručno testirano (PLAN.md sekcija 6)
+  dry_run: false  # ne menjati na false dok slanje nije ručno testirano (PLAN.md sekcija 6)
