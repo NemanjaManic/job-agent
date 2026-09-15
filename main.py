@@ -20,13 +20,39 @@ from agent.dedup import append_records, load_seen, logical_key, source_key
 from agent.filters import matches_layer1
 from agent.format import format_digest
 from agent.llm import score_job
-from agent.sources import remoteok
+from agent.sources import helloworld, infostud, remoteok, weworkremotely
 from agent.telegram import send_digest
 
 DATA_PATH = Path(__file__).resolve().parent / "data" / "seen.jsonl"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("job-agent")
+
+# Mapiranje source id (config.yaml sources.enabled) -> adapter modul.
+# Izvori bez implementiranog adaptera (Faza 3+) se tiho preskaču dok ne budu spremni.
+SOURCE_ADAPTERS = {
+    "remoteok": remoteok,
+    "weworkremotely": weworkremotely,
+    "helloworld_rs": helloworld,
+    "infostud_it_beograd": infostud,
+}
+
+
+def fetch_all_jobs(config: dict) -> list[dict]:
+    jobs: list[dict] = []
+    for source_cfg in config["sources"]["enabled"]:
+        source_id = source_cfg["id"]
+        adapter = SOURCE_ADAPTERS.get(source_id)
+        if adapter is None:
+            continue
+        try:
+            source_jobs = adapter.fetch()
+        except Exception:
+            log.exception("%s: fetch nije uspeo, preskačem izvor za danas.", source_id)
+            continue
+        log.info("%s: %d oglasa dohvaćeno", source_id, len(source_jobs))
+        jobs.extend(source_jobs)
+    return jobs
 
 
 def parse_args() -> argparse.Namespace:
@@ -53,8 +79,8 @@ def run() -> None:
 
     seen_source_keys, seen_logical_keys = load_seen(DATA_PATH)
 
-    raw_jobs = remoteok.fetch()
-    log.info("RemoteOK: %d oglasa dohvaćeno", len(raw_jobs))
+    raw_jobs = fetch_all_jobs(config)
+    log.info("Ukupno dohvaćeno svih izvora: %d", len(raw_jobs))
 
     positive_keywords = config["filters"]["positive_keywords"]
     new_records: list[dict] = []

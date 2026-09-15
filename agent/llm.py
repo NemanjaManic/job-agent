@@ -1,11 +1,19 @@
 from __future__ import annotations
 
 import json
+import re
+import time
 
 import httpx
 
 MODEL = "gemini-flash-lite-latest"  # alias na najnoviji/najjeftiniji flash model — ne pinuje verziju koja može biti povučena
 API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent"
+
+# Besplatan tier ima limit od 15 zahteva/minut (izmereno — vidi grešku ispod).
+# Google u 429 telu poruke sam kaže koliko tačno da se sačeka pre ponovnog pokušaja.
+MAX_RETRIES = 5
+DEFAULT_RETRY_SECONDS = 20.0
+_RETRY_DELAY_PATTERN = re.compile(r"retry in ([\d.]+)s", re.IGNORECASE)
 
 SYSTEM_PROMPT = (
     "Ti si filter za oglase za posao. Korisnik traži isključivo junior/intern pozicije u "
@@ -37,20 +45,35 @@ def score_job(job: dict, target_roles: list[str], api_key: str) -> tuple[int, st
         f"Kompanija: {job.get('company', '')}\n"
         f"Tagovi: {', '.join(job.get('tags', []))}"
     )
-    response = httpx.post(
-        API_URL,
-        headers={"x-goog-api-key": api_key, "content-type": "application/json"},
-        json={
-            "system_instruction": {"parts": [{"text": SYSTEM_PROMPT}]},
-            "contents": [{"parts": [{"text": user_content}]}],
-            "generationConfig": {
-                "response_mime_type": "application/json",
-                "response_schema": RESPONSE_SCHEMA,
-            },
+    payload = {
+        "system_instruction": {"parts": [{"text": SYSTEM_PROMPT}]},
+        "contents": [{"parts": [{"text": user_content}]}],
+        "generationConfig": {
+            "response_mime_type": "application/json",
+            "response_schema": RESPONSE_SCHEMA,
         },
-        timeout=30,
-    )
-    response.raise_for_status()
-    text = response.json()["candidates"][0]["content"]["parts"][0]["text"]
-    result = json.loads(text)
-    return int(result["score"]), str(result["reason"])
+    }
+
+    for attempt in range(MAX_RETRIES):
+        response = httpx.post(
+            API_URL,
+            headers={"x-goog-api-key": api_key, "content-type": "application/json"},
+            json=payload,
+            timeout=30,
+        )
+        if response.status_code == 429 and attempt < MAX_RETRIES - 1:
+            time.sleep(_retry_delay_seconds(response.text))
+            continue
+        response.raise_for_status()
+        text = response.json()["candidates"][0]["content"]["parts"][0]["text"]
+        result = json.loads(text)
+        return int(result["score"]), str(result["reason"])
+
+    raise RuntimeError("Gemini API i dalje vraća 429 posle svih pokušaja.")
+
+
+def _retry_delay_seconds(error_body: str) -> float:
+    match = _RETRY_DELAY_PATTERN.search(error_body)
+    if match:
+        return float(match.group(1)) + 1  # mala margina
+    return DEFAULT_RETRY_SECONDS

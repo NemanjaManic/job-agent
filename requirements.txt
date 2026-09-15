@@ -1,6 +1,7 @@
 httpx>=0.27
 PyYAML>=6.0
 python-dotenv>=1.0
+beautifulsoup4>=4.12
 # Samo za Windows lokalni dev: neki antivirus/korporativni SSL presretači nisu u
 # certifi bazi sertifikata, pa httpx ne moze da verifikuje konekciju bez ovoga.
 # GitHub Actions (Linux) ne treba ovo, pa je namerno ograničeno na win32.
