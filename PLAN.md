@@ -1,269 +1,242 @@
-# Plan: AI agent za traženje poslova (Junior AI/ML Engineer + prakse)
+# Plan: AI job-search agent (Junior AI/ML Engineer + internships)
 
-Fokus: **Junior AI Engineer / Junior ML Engineer / prakse (internships)**, lokacija **Srbija + strani remote**, hosting preko **GitHub Actions**.
+Focus: **Junior AI Engineer / Junior ML Engineer / internships**, location **Serbia + foreign remote**, hosted on **GitHub Actions**.
 
-**Ključna pretpostavka koja oblikuje ceo dizajn:** za ovaj profil u Srbiji realno se očekuje **0–3 nova relevantna oglasa dnevno**, sa danima bez ijednog. To znači da problem nije *količina* nego *prepoznavanje relevantnog u šumu* — pa je strategija "širok filter + LLM presuda", a ne "uzak keyword filter". Ova pretpostavka se proverava u Fazi 0.5 pre nego što se napiše ozbiljniji kod.
-
----
-
-## 0. Pravilo rada: ko commit-uje i push-uje na GitHub
-
-**Sve `git commit` i `git push` operacije tokom razvoja izvršava isključivo korisnik. Claude Code (asistent) nikada sam ne pokreće te komande.**
-
-Konkretno:
-- **Kreiranje repoa (Faza 0):** korisnik sam kreira GitHub repo (preko github.com ili `gh repo create`) i radi initial commit/push. Asistent može da pripremi/napiše fajlove lokalno (kod, `config.yaml`, workflow YAML), ali ne izvršava `git init`, `git commit`, `git push` ni bilo koju drugu komandu koja menja git istoriju ili remote — čak ni uz prethodno odobrenje za sličnu radnju ranije u sesiji.
-- **Tokom celog projekta:** svaka izmena koda koju asistent napravi ostaje kao lokalna, nekomit-ovana promena dok je korisnik lično ne pregleda i commit-uje/push-uje.
-- **Izuzetak — automatski state commit u produkciji (Faza 1+):** kad agent bude deployovan, GitHub Actions workflow (`github-actions[bot]`) će svakodnevno sam commit-ovati i push-ovati ažurirani `data/seen.jsonl` (dedup state), preko ugrađenog, repo-ograničenog `GITHUB_TOKEN`-a — ovo je poseban, unapred dogovoren mehanizam (vidi sekciju 6), **ne** isto što i asistent koji push-uje umesto korisnika. Ti commit-i su potpuno vidljivi i jasno obeleženi:
-  - autor je `github-actions[bot]` (poseban avatar, jasno odvojen od korisnikovog naloga u istoriji i "blame" pogledu),
-  - normalna commit poruka i normalan diff — vidi se tačno šta je promenjeno,
-  - token je ograničen samo na taj repo, nema pristup nalogu, drugim repoima, niti podešavanjima repoa osim onoga što je eksplicitno dozvoljeno u `permissions:` bloku workflow-a.
-
-  **Potvrđeno sa korisnikom:** ovaj automatski bot-commit mehanizam je prihvaćen i ostaje deo dizajna.
-
-### Kad nešto nije jasno — pitaj, ne pretpostavljaj
-Ako u bilo kojoj fazi (izbor izvora, format filtera, ponašanje kod greške, sadržaj poruke, itd.) nešto nije eksplicitno pokriveno planom ili je dvosmisleno, asistent **pita korisnika** pre nego što donese odluku i implementira je — ne nagađa i ne bira "razumnu" opciju samoinicijativno kad postoji realna neizvesnost oko toga šta korisnik želi.
-
-### Zaštita privatnih/osetljivih podataka
-Asistent **ne objavljuje javno** (u public repou, public GitHub Actions logu, commit porukama, issue/PR opisima, ili bilo kom drugom javno vidljivom mestu) informacije koje bi mogle ugroziti korisnika — uključujući, ali ne ograničavajući se na:
-- lične podatke (ime, email, telefon, adresu, CV/profil korisnika iz `config.yaml`),
-- API ključeve, tokene, lozinke, app password-e — ovi idu isključivo u GitHub Secrets, nikad u kod, commit, log ili konfiguracioni fajl koji se commit-uje,
-- sadržaj privatnog mejl inboxa (za IMAP parsiranje job alert mejlova iz sekcije 3),
-- bilo šta iz internih razgovora/beleški koje korisnik ne bi želeo da bude javno vidljivo.
-
-Repo je već planiran kao **privatni** (Faza 0), što je prva linija zaštite, ali ovo pravilo važi nezavisno od toga — npr. GitHub Actions logovi umeju da procure ili se slučajno učine javnim, pa se ni u njih ne ispisuju osetljivi podaci (koristiti GitHub Actions masking/secrets za sve što je tajno).
+**Core assumption shaping the whole design:** for this profile in Serbia, realistically expect **0–3 new relevant postings a day**, with days having none at all. That means the problem isn't *volume* but *finding the relevant signal in the noise* — hence the "broad filter + LLM judgment" strategy, not a "narrow keyword filter". This assumption was checked in Phase 0.5 before any real code was written.
 
 ---
 
-## 1. Tehnički stek i zašto
+## 0. Working rule: who commits and pushes to GitHub
 
-| Komponenta | Izbor | Zašto |
+**All `git commit` and `git push` operations during development are done exclusively by the user. Claude Code (the assistant) never runs those commands itself.**
+
+Specifically:
+- **Repo creation (Phase 0):** the user creates the GitHub repo themselves (via github.com or `gh repo create`) and does the initial commit/push. The assistant may prepare/write files locally (code, `config.yaml`, workflow YAML), but does not run `git init`, `git commit`, `git push`, or any other command that changes git history or the remote — even with prior approval for a similar action earlier in the session.
+- **Throughout the project:** every code change the assistant makes stays as a local, uncommitted change until the user personally reviews and commits/pushes it.
+- **Exception — automatic state commit in production (Phase 1+):** once the agent is deployed, the GitHub Actions workflow (`github-actions[bot]`) commits and pushes the updated `data/seen.jsonl` (dedup state) itself every day, via the built-in, repo-scoped `GITHUB_TOKEN` — this is a separate, pre-agreed mechanism (see section 6), **not** the same as the assistant pushing on the user's behalf. These commits are fully visible and clearly labeled:
+  - the author is `github-actions[bot]` (a distinct avatar, clearly separated from the user's own account in history and blame view),
+  - a normal commit message and normal diff — exactly what changed is visible,
+  - the token is scoped only to that repo, with no access to the account, other repos, or repo settings beyond what's explicitly allowed in the workflow's `permissions:` block.
+
+  **Confirmed with the user:** this automatic bot-commit mechanism is accepted and remains part of the design.
+
+### When something is unclear — ask, don't assume
+If at any stage (source selection, filter format, error behavior, message content, etc.) something isn't explicitly covered by the plan or is ambiguous, the assistant **asks the user** before making and implementing a decision — it doesn't guess or pick a "reasonable" option on its own when there's genuine uncertainty about what the user wants.
+
+### Protecting private/sensitive data
+The assistant **does not publish** (in the public repo, public GitHub Actions logs, commit messages, issue/PR descriptions, or any other publicly visible place) information that could compromise the user — including, but not limited to:
+- personal data (name, email, phone, address, CV/profile from `config.yaml`),
+- API keys, tokens, passwords, app passwords — these go exclusively into GitHub Secrets, never into code, a commit, a log, or a config file that gets committed,
+- private email inbox contents (for IMAP parsing of job alert emails, section 3),
+- anything from internal conversations/notes the user wouldn't want to be publicly visible.
+
+The repo is already planned to be **private** (Phase 0), which is the first line of defense, but this rule applies regardless — e.g. GitHub Actions logs can leak or accidentally become public, so sensitive data isn't printed into them either (use GitHub Actions masking/secrets for anything secret).
+
+---
+
+## 1. Tech stack and why
+
+| Component | Choice | Why |
 |---|---|---|
-| Jezik | **Python 3.11+** | Najbolji ekosistem za parsing/scraping (`httpx`, `feedparser`, `BeautifulSoup`/`lxml`), radi glatko na `ubuntu-latest` runneru, bez kompajliranja |
-| HTTP | `httpx` | Pozivi ka API-jima, preuzimanje HTML/RSS strana; ima ugrađen timeout/retry handling |
-| Parsing | `feedparser` (RSS), `BeautifulSoup` (HTML fallback) | RSS je prioritet gde postoji — stabilniji od HTML scraping-a |
-| Headless browser | **Ne koristiti** (ni Playwright) | JS-teški sajtovi se rešavaju preko posrednika ili se izostavljaju; browser na runneru je spor, krhak i signal da izvor ne treba scrape-ovati |
-| Skladište za dedup | **`data/seen.jsonl`** (append-only JSON Lines), commit-ovan nazad u repo | Vidi sekciju 4 — namerno **ne** SQLite |
-| Konfiguracija | `config.yaml` (pozicije, ključne reči, lokacije, izvori, pragovi) | Menjanje kriterijuma bez diranja koda |
-| LLM rangiranje | Claude API (jeftiniji model), od Faze 2 | Vidi sekciju 3.1 |
-| Slanje poruka | Telegram Bot API + `smtplib` email fallback | Vidi sekciju 2 |
-| Orkestracija | GitHub Actions (`schedule` + `workflow_dispatch`) | Vidi sekciju 6 |
-| Sekreti | GitHub Actions Secrets | Nikad u kodu/repo-u |
+| Language | **Python 3.11+** | Best ecosystem for parsing/scraping (`httpx`, `feedparser`, `BeautifulSoup`/`lxml`), runs smoothly on the `ubuntu-latest` runner, no compilation |
+| HTTP | `httpx` | Calls to APIs, fetching HTML/RSS pages; has built-in timeout/retry handling |
+| Parsing | `feedparser` (RSS), `BeautifulSoup` (HTML fallback) | RSS is preferred where it exists — more stable than HTML scraping |
+| Headless browser | **Not used** (not even Playwright) | JS-heavy sites are handled through an intermediary or skipped; a browser on the runner is slow, fragile, and a sign the source probably shouldn't be scraped |
+| Dedup store | **`data/seen.jsonl`** (append-only JSON Lines), committed back to the repo | See section 4 — deliberately **not** SQLite |
+| Configuration | `config.yaml` (roles, keywords, locations, sources, thresholds) | Change behavior without touching code |
+| LLM ranking | **Google Gemini API** (free tier), from Phase 2 | See section 3.1 — switched from the originally planned Claude API because the user doesn't have Anthropic credits; Gemini's free tier covers this volume at no cost |
+| Sending messages | Telegram Bot API + `smtplib` email fallback | See section 2 |
+| Orchestration | GitHub Actions (`schedule` + `workflow_dispatch`) | See section 6 |
+| Secrets | GitHub Actions Secrets | Never in code/the repo |
 
-Nema Node.js, Docker-a, Postgres-a — overengineering za lični projekat ovog obima.
+No Node.js, Docker, Postgres — overengineering for a personal project of this size.
 
 ---
 
-## 2. Slanje poruka
+## 2. Sending messages
 
-### Telegram (primarni kanal)
-1. U Telegramu razgovor sa **@BotFather** → `/newbot` → ime i username → dobiješ **bot token**.
-2. Pošalješ svom botu bilo koju poruku (npr. `/start`).
-3. Otvoriš `https://api.telegram.org/bot<TOKEN>/getUpdates` → u JSON-u nađeš svoj **chat_id**.
-4. Slanje = POST na `https://api.telegram.org/bot<TOKEN>/sendMessage` sa `chat_id` i `text` (podržava HTML/Markdown i linkove).
-5. Token i chat_id → GitHub Secrets.
+### Telegram (primary channel)
+1. Chat with **@BotFather** on Telegram → `/newbot` → name and username → get a **bot token**.
+2. Send your bot any message (e.g. `/start`).
+3. Open `https://api.telegram.org/bot<TOKEN>/getUpdates` → find your **chat_id** in the JSON.
+4. Sending = POST to `https://api.telegram.org/bot<TOKEN>/sendMessage` with `chat_id` and `text` (supports HTML/Markdown and links).
+5. Token and chat_id → GitHub Secrets.
 
-Besplatno, bez relevantnih limita za 1 digest dnevno.
+Free, no relevant limits for one digest a day.
 
-### Format poruke (definisati u Fazi 1)
-Po oglasu:
+### Message format (✅ implemented as described)
+Per job:
 ```
-🔹 <b>Naziv pozicije</b> — Kompanija
-📍 Lokacija / Remote  ·  🕒 objavljeno pre X dana  ·  izvor
-💡 [1 rečenica: zašto je ovo relevantno za tebe]
+🔹 <b>Job title</b> — Company
+📍 Location / Remote  ·  🕒 posted X days ago  ·  source
+💡 [1 sentence: why this is relevant to you — the Layer 2 LLM reason]
 🔗 link
 ```
-**Starost oglasa je obavezno polje** — junior pozicije se popunjavaju brzo, oglas star tri nedelje ne vredi isto kao jučerašnji. Ako izvor ne daje datum, prikazati "datum nepoznat", ne izostaviti red.
+**Job age is a mandatory field** — junior positions fill up fast, a posting from three weeks ago isn't worth the same as yesterday's. If the source doesn't give a date, show "date unknown" rather than omitting the line.
 
-### Ponašanje kad nema novih oglasa
-**Ne šalji ništa.** Pri očekivanom obimu (često 0 novih dnevno), svakodnevna "0 novih" poruka te za nedelju dana nauči da ignorišeš bota — čime ceo projekat gubi smisao. Umesto toga: nedeljni sažetak petkom ("ove nedelje: 4 poslata, 31 filtriran, svi izvori zdravi") koji potvrđuje da agent radi.
+### Behavior when there are no new postings
+**Send nothing.** At the expected volume (often 0 new per day), a daily "0 new" message trains you to ignore the bot within a week — which defeats the whole point of the project. Instead: a weekly summary on Fridays ("this week: 4 sent, 31 filtered, all sources healthy") that confirms the agent is working. *(Not yet implemented — planned for Phase 4.)*
 
 ### Email (fallback)
-- Gmail SMTP + **App Password** (traži 2FA; obična lozinka ne radi), ~500 mejlova/dan limit — više nego dovoljno.
-- Alternativa: SendGrid free tier (100/dan).
-- Uloga: (a) fallback ako Telegram slanje padne, (b) error alerting kad run pukne.
+- Gmail SMTP + **App Password** (requires 2FA; a regular password won't work), ~500 emails/day limit — more than enough.
+- Alternative: SendGrid free tier (100/day).
+- Role: (a) fallback if Telegram sending fails, (b) error alerting when a run breaks.
 
-### WhatsApp / Viber (samo napomena, ne implementirati)
-WhatsApp Cloud API traži Meta Business nalog i verifikaciju, naplaćuje se preko besplatnog praga; Twilio naplaćuje po poruci; Viber zahteva da korisnik ručno subscribe-uje bota. Telegram pokriva potrebu — ovo ostaje u Fazi 5 samo ako se pojavi konkretan razlog.
-
----
-
-## 3. Izvori oglasa i strategija filtriranja
-
-Prioritet: **API > RSS > pažljiv scraping**.
-
-> **Važno:** tabela ispod je *lista kandidata za proveru*, ne finalna lista izvora. Koji se izvori zaista implementiraju odlučuje se u **Fazi 0.5** na osnovu izmerenih podataka.
-
-### Kandidati — Srbija/region
-| Izvor | Očekivani metod | Napomena |
-|---|---|---|
-| poslovi.infostud.com | RSS po pretrazi (proveriti) ili scraping | Najveći job board u Srbiji, ima kategoriju "praksa" |
-| HelloWorld.rs | Scraping | IT fokus, dosta entry pozicija |
-| Startit.rs | RSS ili scraping | Startup/junior/praksa oglasi kojih nema drugde |
-| Djinni.co | RSS po sačuvanoj pretrazi ili scraping | Popularan u regionu, dosta junior oglasa |
-| NoFluffJobs | Javni JSON API | CEE fokus, pravno čisto |
-
-### Kandidati — AI/ML i remote
-| Izvor | Očekivani metod | Napomena |
-|---|---|---|
-| RemoteOK | **Javni JSON API**, bez auth-a | Najlakši start, koristi se kao MVP izvor |
-| ai-jobs.net | RSS ako postoji, inače scraping | Dedikovan AI/ML board |
-| WeWorkRemotely | RSS po kategoriji | Dosta mid/senior — filter bitan |
-| Wellfound | Scraping (API traži partnerstvo) | Nizak prioritet |
-
-### LinkedIn i Indeed
-Oba **zabranjuju scraping u ToS-u** i imaju jaku anti-bot zaštitu; njihovi API-ji su zatvoreni za obične korisnike. Dve legitimne opcije, redosled po preporuci:
-
-1. **Parsiranje job alert mejlova** (preporučeno) — ručno podesiš LinkedIn/Indeed job alerte na poseban mejl, agent čita taj inbox preko IMAP-a i parsira oglase. Besplatno, bez limita, pravno čisto jer ti sami sajtovi šalju te podatke. Ovo je *promovisano iz "nice to have" u primarno rešenje*.
-2. **SerpApi / sličan Google Jobs agregator** — legalno, ali ima mesečni limit besplatnih upita i **neizvesnu pokrivenost za Srbiju**. Integrisati **samo ako Faza 0.5 potvrdi** da vraća smislene rezultate za tvoje upite.
-
-Ne raditi: CAPTCHA solving, IP rotaciju, direktan scraping ova dva sajta.
-
-### 3.1 Strategija filtriranja (dvoslojna)
-
-Keyword filter sam po sebi ne radi za ovaj profil. Junior AI/ML pozicije se u Srbiji često oglašavaju kao "Python Developer", "Data Analyst", "Junior Software Engineer", "ML intern" — bez ijedne AI reči u naslovu. Agresivna lista negativnih reči (`senior`, `5+ years`, `lead`) poješće upravo one oglase koje želiš, jer oglasi često pominju "senior" u opisu tima.
-
-- **Sloj 1 — širok, jeftin filter (kod):** propušta sve što je iole blizu (tech pozicije, junior/intern/entry signali, ili odsustvo jasnog senior signala). Cilj je *ne izgubiti ništa*, ne biti precizan. Očekivano: 20–50 oglasa dnevno prolazi.
-- **Sloj 2 — LLM presuda (Claude API):** za svaki oglas iz Sloja 1, model dobija tvoj profil (CV/skill lista iz `config.yaml`) i tekst oglasa, i vraća `score` (0–10) + jednu rečenicu obrazloženja. Šalje se samo iznad praga (npr. 6+), sortirano po score-u; obrazloženje ide u Telegram poruku.
-
-Trošak: 20–50 kratkih poziva dnevno jeftinom modelu je reda veličine centi mesečno. Zato je LLM rangiranje **pomereno iz Faze 5 u Fazu 2** — ono rešava centralni problem projekta, a ne kozmetiku.
-
-### Pravna napomena (za sve scraping izvore)
-- Pre implementacije proveriti `robots.txt` i ToS svakog sajta.
-- Scraping: **1x dnevno**, realan User-Agent koji identifikuje bota i daje kontakt, bez paralelnih zahteva, bez redistribucije podataka (jedini primalac si ti).
-- Ako sajt zabranjuje scraping ili počne da blokira — izvor se **isključuje ili zamenjuje**, zaštita se ne probija.
+### WhatsApp / Viber (note only, not to be implemented)
+WhatsApp Cloud API requires a Meta Business account and verification, and charges past the free threshold; Twilio charges per message; Viber requires the user to manually subscribe to the bot. Telegram covers the need — this stays in Phase 5, only if a concrete reason comes up.
 
 ---
 
-## 4. Skladište za dedup
+## 3. Job sources and filtering strategy
 
-**Format: `data/seen.jsonl`** — jedan JSON objekat po liniji, append-only.
+Priority: **API > RSS > careful scraping**.
 
-Zašto ne SQLite (izmena u odnosu na raniju verziju plana): SQLite je binarni fajl. Commit-ovan u git pri svakom run-u znači punu novu kopiju u istoriji, nečitljiv diff i **nerešiv merge konflikt**. JSONL je tekstualan → diff pokazuje tačno šta je agent video kog dana, konflikt se rešava ručno, repo ne buja. Ako ikad zatrebaju upiti, SQLite se lokalno generiše iz JSONL-a.
+### 3.1 Filtering strategy (two-layer, ✅ implemented as described)
 
-Polja po zapisu:
+A keyword filter alone doesn't work for this profile. Junior AI/ML positions in Serbia are often advertised as "Python Developer", "Data Analyst", "Junior Software Engineer", "ML intern" — with no AI word in the title at all. An aggressive negative-keyword list (`senior`, `5+ years`, `lead`) would eat exactly the postings you want, since postings often mention "senior" in the team description.
 
-| Polje | Opis |
+- **Layer 1 — broad, cheap filter (code):** lets through anything even remotely close (tech positions, junior/intern/entry signals, or the absence of a clear senior signal). The goal is *not to lose anything*, not to be precise. Expected: 20–50 postings a day pass through.
+- **Layer 2 — LLM judgment (Google Gemini API, free tier):** for every posting from Layer 1, the model gets the target roles from `config.yaml` and the posting text, and returns a `score` (0–10) + one-sentence reason. Only what's above the threshold (currently 6) gets sent, sorted by score; the reason goes into the Telegram message. *(Note: by the user's explicit choice, the model does **not** get a personal CV/skills profile — only the generic target roles in `config.yaml`, for privacy reasons.)*
+
+Cost: at this volume, Gemini's free tier (15 requests/minute) covers it at **zero cost** — this is why LLM ranking was moved from Phase 5 into Phase 2 in the original plan: it solves the project's central problem, not just cosmetics. The free-tier rate limit was hit during real testing; `agent/llm.py` handles it with automatic retry using Google's suggested wait time, so a run just takes a little longer instead of failing.
+
+### Legal note (for all scraping sources)
+- Check `robots.txt` and the ToS of every site before implementing.
+- Scraping: **once a day**, a real User-Agent that identifies the bot and gives contact info, no parallel requests, no redistribution of data (you're the only recipient).
+- If a site forbids scraping or starts blocking — the source is **disabled or replaced**, protections are never bypassed.
+
+---
+
+## 4. Dedup store
+
+**Format: `data/seen.jsonl`** — one JSON object per line, append-only. ✅ Implemented as described.
+
+Why not SQLite: SQLite is a binary file. Committed to git on every run, that means a full new copy in history, an unreadable diff, and an **unresolvable merge conflict**. JSONL is text → the diff shows exactly what the agent saw on which day, conflicts are resolved by hand, the repo doesn't balloon. If queries are ever needed, SQLite can be generated locally from the JSONL.
+
+Fields per record:
+
+| Field | Description |
 |---|---|
-| `source_key` | Hash od `source + normalized_url` — identitet oglasa na konkretnom izvoru |
-| `logical_key` | Hash od normalizovanog `company + title + location` — vidi ispod |
-| `source` | npr. `remoteok`, `infostud` |
-| `title`, `company`, `location`, `url` | Osnovni podaci |
-| `posted_date` | Datum objave ako izvor daje (nullable) |
-| `first_seen_at` | Kad ga je agent prvi put video |
-| `llm_score`, `llm_reason` | Rezultat Sloja 2 (nullable ako nije stigao do LLM-a) |
-| `status` | `sent` / `filtered_keyword` / `filtered_llm` / `duplicate` |
-| `sent_at` | Kad je poslat (nullable) |
+| `source_key` | Hash of `source + normalized_url` — a posting's identity on a specific source |
+| `logical_key` | Hash of normalized `company + title + location` — see below |
+| `source` | e.g. `remoteok`, `infostud`, `helloworld`, `weworkremotely` |
+| `title`, `company`, `location`, `url` | Basic data |
+| `posted_date` | Posting date if the source provides one (nullable) |
+| `first_seen_at` | When the agent first saw it |
+| `llm_score`, `llm_reason` | Layer 2 result (nullable if it never reached the LLM) |
+| `status` | `sent` / `sent_dry_run` / `filtered_keyword` / `filtered_llm` |
+| `sent_at` | When it was sent (nullable) |
 
-**Dva ključa, ne jedan.** Hash samo od `source + url` propušta isti oglas koji se pojavi i na RemoteOK-u i na ai-jobs.net — dobio bi ga dvaput. Zato `logical_key`: lowercase, uklonjena interpunkcija, uklonjeni sufiksi tipa `(m/ž)`, `(remote)`, `- Belgrade`. Oglas je nov samo ako **oba** ključa nisu viđena.
+**Two keys, not one.** A hash of just `source + url` would let the same posting that appears on both RemoteOK and another board through twice — you'd get it twice. Hence `logical_key`: lowercase, punctuation stripped, suffixes like `(m/f)`, `(remote)`, `- Belgrade` stripped. A posting is new only if **both** keys are unseen.
 
-Tok run-a: fetch → normalizuj → izračunaj oba ključa → odbaci viđene → Sloj 1 filter → Sloj 2 (LLM) → sortiraj po score-u → pošalji → **upiši sve nove zapise** (i poslate i odbačene, sa razlogom) → commit & push.
+Run flow: fetch (all sources) → normalize → compute both keys → drop already-seen → Layer 1 filter → Layer 2 (LLM) → sort by score → send → **write all new records** (sent and rejected alike, with a reason) → commit & push.
 
-Odbačene čuvamo da se ne procesiraju ponovo sutra (štedi LLM pozive) i da možeš videti *zašto* nešto nije poslato.
+Rejected postings are kept so they aren't reprocessed tomorrow (saves LLM calls) and so you can see *why* something wasn't sent.
 
 ---
 
-## 5. Faza 0.5 — Izviđanje izvora (urađeno)
+## 5. Phase 0.5 — Source recon (done, then re-verified during implementation)
 
-"Relevantnih" = junior/intern AI, ML, data ili Python pozicija, Srbija ili remote otvoren za Srbiju.
+"Relevant" = junior/intern AI, ML, data, or Python position, Serbia or remote open to Serbia.
 
-Pravilo odluke: 0–2 oglasa/30 dana → preskoči; API/RSS + ≥3 → implementira se; samo scraping + ≥5 → implementira se, ali kasnije (Faza 2b); robots.txt blokira baš pretragu/filtere → preskoči bez obzira na sve ostalo.
+Decision rule: 0–2 postings/30 days → skip; API/RSS + ≥3 → implement; scraping only + ≥5 → implement, but later (Phase 2b); robots.txt blocks exactly the search/filters → skip regardless of everything else.
 
-> **Napomena o metodu:** ovu tabelu je popunio asistent alatima (WebFetch/WebSearch — provera robots.txt, RSS/API endpoint-a i trenutnog sadržaja stranica) umesto ručnog browsovanja, da se uštedi vreme. Dva reda su ostala neizvesna i traže tvoju ručnu proveru u browseru pre nego što se implementiraju (označeno ispod).
+> **Note on method:** the original version of this table was filled in with tools (WebFetch/WebSearch) instead of manual browsing, to save time. During actual implementation (Phase 2b), several sites turned out to have changed or to work differently than the initial recon suggested — HelloWorld.rs's URL scheme, for instance, doesn't match what the earlier automated pass found. The table below reflects what's actually implemented and verified working, not just the original probe.
 
-| Izvor | Ima RSS? | Ima API? | robots.txt dozvoljava? | Nalaz (~30 dana) | Odluka |
+| Source | Has RSS? | Has API? | robots.txt allows it? | Finding | Decision |
 |---|---|---|---|---|---|
-| **RemoteOK** | – | ✅ `remoteok.com/api`, bez auth-a, potvrđeno radi (testirano plain curl-om) | Da (API nije blokiran; napomena: robots.txt eksplicitno blokira AI-crawlere poput ClaudeBot-a — nebitno za naš skript jer koristi običan HTTP klijent, ne AI-agent UA) | Veliki, aktivan feed; AI/data tagovi prisutni (npr. "AI Response Analyst") | **Implementira se — Faza 1 (MVP)**. ToS traži: ako se rezultati ikad javno prikažu (npr. Faza 5 dashboard), obavezan backlink ka RemoteOK. Za privatni Telegram digest nije relevantno. |
-| **WeWorkRemotely** | ✅ RSS po kategoriji, potvrđeno radi (`/categories/remote-programming-jobs.rss`) | – | Da | 10 uzorkovanih: 1 eksplicitno junior, nekoliko AI/ML (uglavnom senior) | **Implementira se — Faza 2**. Nizak trud (RSS), povremeni pogodak; filter mora biti strog jer je većina senior. |
-| **HelloWorld.rs** | Nije nađen | Nije nađen | Da (nema blokade na oglase) | Ima namensku **"Prakse" kategoriju (3 oglasa)** + filter junior/intermediate/senior; ~10+ oglasa pominje AI/Data/Python od ukupno 30 prikazanih | **Implementira se — Faza 2b** (scraping). Najbolji lokalni izvor zbog ugrađenog junior/praksa filtera — lakše targetirati nego generičku listu. |
-| **poslovi.infostud.com** | Blokiran robots.txt-om (`Disallow: /rss_feed/*`) | Nema | **Delimično** — `/search/*` je blokiran (ne sme se scrape-ovati pretraga), ali kategorijske stranice kao `/oglasi-za-posao-it/beograd` **nisu** blokirane | IT kategorija (Beograd): 101 oglas, 9+ pominje AI/Data/Python/ML, samo 1 eksplicitno junior. ("Poslovi za mlade" je odvojena sekcija sa 738 oglasa ali skoro isključivo ne-IT — retail/hospitality, **ne koristi se**.) | **Implementira se — Faza 2b** (scraping kategorijskih stranica, ne search endpoint-a). Najveći izvor po zapremini, ali nizak junior signal — LLM sloj (sekcija 3.1) će nositi glavni teret filtriranja ovde. |
-| **Djinni.co** | Nejasno | Nejasno | **Ne** — robots.txt blokira baš `/q` (search/query) i `/jobs2`, tj. tačno ono što nam treba | Nije mereno (blokirano pravilom odluke pre merenja) | **Preskače se.** robots.txt eksplicitno zabranjuje pristup pretrazi. |
-| **Wellfound** | Nema | Zahteva partnerstvo | **Ne** — blokira `/search`, `/jobs/applications`, `/jobs/signup` i filter-parametre (`role`, `jobId`, `jobSlug`) | Nije mereno | **Preskače se.** Isti razlog kao Djinni — blokirano baš ono što treba. |
-| **NoFluffJobs** | Nema | **Nema zvaničnog javnog API-ja** — postoje samo nezvanični/plaćeni scraperi (Apify i sl.), van naše ToS-tolerancije | Sajt aktivno blokira automatizovan pristup (fetch je odbijen) | Nije mereno | **Preskače se.** |
-| **ai-jobs.net (sad "Foorilla")** | Nejasno | Postoji link `/api/list/`, ali sadržaj/uslovi nisu bili dostupni automatskom proverom (izgleda kao JS-rendered stranica) | Domen je 301-redirect na `foorilla.com` u celini | Nije mereno | **⚠️ Neizvesno — treba tvoja ručna provera** u browseru: otvori `foorilla.com/api/list/`, proveri da li je API besplatan/otvoren i da li pokriva junior/AI/data pozicije za Srbiju/remote. Javi nalaz pa odlučujemo. |
-| **Startit.rs** | Nejasno | Nema | Da (nema blokade) | **Nekonzistentno** — automatska provera je dala kontradiktorne rezultate (jedna stranica vratila nepovezane oglase, druga 404). Tačna URL struktura poslovi sekcije nije pouzdano utvrđena alatima. | **⚠️ Neizvesno — treba tvoja ručna provera.** Otvori startit.rs u browseru, nađi njihovu "Poslovi" sekciju, javi tačan URL i da li ima junior/AI/praksa oglasa — pa odlučujemo. |
-| **LinkedIn / Indeed** | – | Zatvoreno za obične korisnike | ToS zabranjuje scraping | – | **Job alert mejlovi = primarni metod (Faza 3)**, ne scraping. |
-| **SerpApi (Google Jobs)** | – | ✅ Postoji zvaničan `engine=google_jobs` endpoint, potvrđeno dokumentacijom | – (legitiman API, ne scraping) | Free tier: **250 pretraga/mesec, 50/h throughput** — dovoljno za 1x dnevno par upita. **Pokrivenost za Srbiju nije testirana** (treba pravi API ključ) | **Sekundarna opcija — testirati sa pravim ključem u Fazi 3.** Tehnički postoji i dostupan je; ne odbacuje se, ali se ne implementira pre job alert mejlova. |
+| **RemoteOK** | – | ✅ `remoteok.com/api`, no auth, confirmed working | Yes | Large, active feed; AI/data tags present | **✅ Implemented — Phase 1.** Public JSON API, no auth. ToS requires a backlink to RemoteOK if results are ever shown publicly (e.g. a future dashboard); not relevant for a private Telegram digest. |
+| **WeWorkRemotely** | ✅ RSS by category, confirmed working (`/categories/remote-programming-jobs.rss`) | – | Yes | Mostly mid/senior — filtering matters | **✅ Implemented — Phase 2b.** RSS parsed with the standard-library XML parser (title is "Company: Position", plus region/category/pubDate/link) — no extra dependency needed. |
+| **HelloWorld.rs** | Not found | Not found | Yes (no block on postings) | Original recon found a "Prakse" (internships) page. **What was actually found during implementation:** the site also has a dedicated **AI/ML tag view** at `/oglasi-za-posao/aiml` (a real filter — 19 postings vs. 30 on the generic list, verified by comparing results) — a much better-targeted source than the generic listing, and more important than the internships page alone. | **✅ Implemented — Phase 2b** (scraping both `/oglasi-za-posao/aiml` and `/prakse`, not the generic listing). Parsed via BeautifulSoup, anchored on stable GA4-tracking CSS classes (`__ga4_job_title`, etc.) rather than fragile Tailwind utility classes, since some fields (e.g. company link) inconsistently omit their class attribute — the parser falls back to DOM structure (`<h3>`→next `<h4>`) in that case. |
+| **poslovi.infostud.com** | Blocked by robots.txt (`Disallow: /rss_feed/*`) | Not documented, but the page embeds a **Next.js `__NEXT_DATA__` JSON blob** with full structured job data — used instead of HTML scraping, much more robust | **Partial** — `/search/*` is blocked, but category pages like `/oglasi-za-posao-it/beograd` are **not** blocked | The generic IT/Belgrade category has 111 postings with low junior signal, as originally found. But Infostud shares its tag taxonomy with HelloWorld.rs (same company): filtering that same category page with `?tags=563` (AI/ML) and `?tags=340` (Prakse) narrows it to 10 + 6 targeted postings — same approach as HelloWorld.rs. | **✅ Implemented — Phase 2b**, using the two tag-filtered URLs, not the generic 111-posting category page. Parsed by extracting and JSON-decoding the `__NEXT_DATA__` script tag (`props.pageProps.initialSearchResults.jobs.primary`) rather than CSS selectors — gives clean structured fields (`onlineViewDate`, `itTags`, etc.) directly. |
+| **Djinni.co** | Unclear | Unclear | **No** — robots.txt blocks exactly `/q` (search/query) and `/jobs2`, i.e. exactly what we'd need | Not measured (blocked by the decision rule before measuring) | **Skipped.** robots.txt explicitly forbids access to search. |
+| **Wellfound** | None | Requires a partnership | **No** — blocks `/search`, `/jobs/applications`, `/jobs/signup` and filter parameters (`role`, `jobId`, `jobSlug`) | Not measured | **Skipped.** Same reason as Djinni — exactly what's needed is blocked. |
+| **NoFluffJobs** | None | **No official public API** — only unofficial/paid scrapers (Apify etc.), outside our ToS tolerance | Site actively blocks automated access (fetch was refused) | Not measured | **Skipped.** |
+| **ai-jobs.net (now "Foorilla")** | Unclear | A `/api/list/` link exists, but content/terms weren't reachable by automated check (looks JS-rendered) | Domain is a full 301 redirect to `foorilla.com` | Not measured | **Not pursued.** Left as a future option if it turns out to be worth checking manually — not blocking anything currently implemented. |
+| **Startit.rs** | Unclear | None | Yes (no block) | **Inconsistent** — automated recon gave contradictory results (one page returned unrelated postings, another 404). The exact URL structure of the jobs section wasn't reliably established by tooling. | **Not pursued for now.** Low priority given 4 working sources already cover the target profile well; revisit if source diversity becomes a problem. |
+| **LinkedIn / Indeed** | – | Closed to regular users | ToS forbids scraping | – | **Job alert emails = primary method (Phase 3)**, not scraping. Not yet implemented. |
+| **SerpApi (Google Jobs)** | – | ✅ An official `engine=google_jobs` endpoint exists, confirmed by documentation | – (legitimate API, not scraping) | Free tier: **250 searches/month, 50/h throughput** — enough for a couple of queries once a day. **Coverage for Serbia untested** (needs a real API key) | **Secondary option — test with a real key in Phase 3.** Not yet implemented. |
 
-**Zaključak Faze 0.5:** redosled implementacije izvora — **Faza 1:** RemoteOK. **Faza 2:** WeWorkRemotely (RSS). **Faza 2b:** HelloWorld.rs + Infostud (scraping, uz jak LLM filter za Infostud). **Faza 3:** LinkedIn/Indeed preko job alert mejlova, SerpApi kao test. Djinni, Wellfound, NoFluffJobs otpadaju (robots.txt/nedostupnost). Startit.rs i Foorilla/ai-jobs.net čekaju tvoju ručnu proveru pre finalne odluke.
-
-Preostalo za tebe pre Faze 1: podesiti LinkedIn i Indeed job alerte na poseban mejl (počinje da skuplja podatke odmah, dok se agent gradi).
+**Phase 0.5 conclusion, updated:** implementation order was — **Phase 1:** RemoteOK. **Phase 2:** LLM ranking (moved ahead of additional sources, see section 3.1). **Phase 2b:** WeWorkRemotely, HelloWorld.rs, and Infostud — all three now live, each targeting the source's own best-signal view (AI/ML tag / internships) rather than a generic list wherever that option exists. Djinni, Wellfound, NoFluffJobs remain dropped (robots.txt/inaccessible). Startit.rs and Foorilla/ai-jobs.net remain unpursued, not currently a priority. **Phase 3** (LinkedIn/Indeed via job alert emails, SerpApi as a test) is the next real gap.
 
 ---
 
-## 6. Pokretanje — GitHub Actions
+## 6. Running it — GitHub Actions
 
-| Opcija | Prednosti | Mane |
+| Option | Pros | Cons |
 |---|---|---|
-| **GitHub Actions (izabrano)** | Besplatno za ovaj obim (~60–90 min/mesec od 2000 free za privatne repoe), ne zavisi od tvog računara, Secrets ugrađeni, log istorija u UI | Efemeran runner → state se mora commit-ovati nazad; cron nije precizan |
-| Lokalni računar (Task Scheduler) | Najlakše za probu | Računar mora biti upaljen u zakazano vreme — ne zadovoljava zahtev |
-| VPS (Oracle Free Tier, Hetzner) | Najfleksibilnije | Održavanje, update-i, bezbednost — nepotreban overhead |
+| **GitHub Actions (chosen)** | Free at this scale (~60–90 min/month out of 2000 free for private repos), doesn't depend on your computer, Secrets built in, log history in the UI | Ephemeral runner → state has to be committed back; cron isn't precise |
+| Local machine (Task Scheduler) | Easiest to try | The computer has to be on at the scheduled time — doesn't meet the requirement |
+| VPS (Oracle Free Tier, Hetzner) | Most flexible | Maintenance, updates, security — unnecessary overhead |
 
-### Konkretne GitHub Actions zamke koje treba pokriti u workflow-u
+### Concrete GitHub Actions gotchas to cover in the workflow
 
-- **`workflow_dispatch` obavezno pored `schedule`.** Bez toga tokom razvoja čekaš cron da bi testirao. Ovo štedi sate.
-- **Cron na neparan minut**, npr. `17 5 * * *`, ne `0 6 * * *`. Zakazivanja na pun sat su najopterećenija i znaju da kasne i po sat vremena.
-- **DST:** cron je u UTC, Srbija je UTC+1 zimi / UTC+2 leti — vreme isporuke se pomera za sat dva puta godišnje. Nije problem, samo znaj.
-- **`concurrency` grupa** + `git pull --rebase` pre push-a, da se run-ovi ne sudare oko `seen.jsonl`.
-- **60-dnevno gašenje zakazanih workflow-ova:** GitHub gasi `schedule` trigger nakon perioda neaktivnosti repoa. Proveriti u Fazi 0.5 da li bot-commit-i (`github-actions[bot]`) računaju kao aktivnost — ako ne, agent tiho umire za dva meseca. Mitigacija ako treba: mesečni ručni commit ili `workflow_dispatch` podsetnik.
-- **`--dry-run` flag** u skripti: radi sve osim slanja, ispisuje digest u log. Bez ovoga ćeš sebi poslati desetak test poruka dok podešavaš filtere.
-- Failure notification: GitHub sam šalje mejl kad workflow pukne — besplatan sloj alertinga.
+- **`workflow_dispatch` alongside `schedule` is mandatory.** Without it you'd wait for the cron to test during development. Saves hours.
+- **Cron on an odd minute**, e.g. `17 5 * * *`, not `0 6 * * *`. Top-of-the-hour schedules are the most congested and tend to run late.
+- **DST:** cron is in UTC, Serbia is UTC+1 in winter / UTC+2 in summer — delivery time shifts by an hour twice a year. Not a problem, just something to know.
+- **`concurrency` group** + `git pull --rebase` before pushing, so runs don't collide over `seen.jsonl`.
+- **60-day shutdown of scheduled workflows:** GitHub disables the `schedule` trigger after a period of repo inactivity. Whether bot commits (`github-actions[bot]`) count as activity wasn't confirmed — if they don't, the agent quietly dies after two months. Mitigation if needed: a monthly manual commit or a `workflow_dispatch` reminder. **Not yet verified in production** (the repo is under 2 months old as of this writing).
+- **`--dry-run` flag** in the script: does everything except sending, logs the digest instead. Implemented from Phase 1.
+- Failure notification: GitHub emails you when a workflow breaks — a free alerting layer.
 
-Tok workflow-a: checkout → setup Python → install deps → run skripte → commit + push `data/seen.jsonl` kao `github-actions[bot]`.
+**✅ Confirmed in production, beyond what was originally planned:** the `schedule` trigger is *much* less precise than expected — configured for 05:17 UTC, but observed runs consistently fire around 09:20–10:40 UTC instead (a 4–5 hour delay), every day for a week straight. This appears to be a free-tier/low-activity-repo scheduling reality, not an occasional fluke. Not fixed; documented as a known limitation (see README). A fix, if ever needed, would be an external pinger (e.g. cron-job.org) calling `workflow_dispatch` at the exact time — not implemented, since the daily digest doesn't need to be precisely timed.
+
+Workflow flow (✅ implemented as described): checkout → setup Python → install deps → run the script → commit + push `data/seen.jsonl` as `github-actions[bot]`.
 
 ---
 
-## 7. Fazni plan implementacije
+## 7. Phased implementation plan
 
-### Faza 0 — Setup (~1h)
-**Korisnik lično** kreira privatni GitHub repo i radi initial commit/push (vidi sekciju 0 — asistent ne izvršava git komande). Telegram bot preko BotFather-a + chat_id. GitHub Secrets (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`). Asistent priprema strukturu projekta + `config.yaml` skeleton lokalno, korisnik ih pregleda i commit-uje.
+### Phase 0 — Setup ✅ done
+The user personally created the private GitHub repo and did the initial commit/push (see section 0 — the assistant doesn't run git commands). Telegram bot via BotFather + chat_id. GitHub Secrets (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`). The assistant prepared the project structure + `config.yaml` skeleton locally, the user reviewed and committed them.
 
-### Faza 0.5 — Izviđanje izvora (~1–2h, bez koda)
-Vidi sekciju 5. **Ne preskakati.** Izlaz: finalna lista izvora + odluka o SerpApi + podešeni job alerti.
+### Phase 0.5 — Source recon ✅ done
+See section 5.
 
-### Faza 1 — MVP: RemoteOK + Telegram (~3–5h)
-RemoteOK API kao prvi izvor (bez auth-a, legalan, dobar signal). Fetch → normalizacija → dvoključni dedup u `seen.jsonl` → Sloj 1 filter → Telegram digest sa definisanim formatom poruke. `--dry-run` od početka. GitHub Actions workflow sa `schedule` + `workflow_dispatch` + commit state-a.
-**Cilj:** end-to-end lanac radi sam, jednom dnevno.
+### Phase 1 — MVP: RemoteOK + Telegram ✅ done
+RemoteOK API as the first source (no auth, legal, good signal). Fetch → normalize → two-key dedup in `seen.jsonl` → Layer 1 filter → Telegram digest with the defined message format. `--dry-run` from the start. GitHub Actions workflow with `schedule` + `workflow_dispatch` + state commit.
 
-### Faza 2 — LLM rangiranje (~3–4h)
-Sloj 2 iz sekcije 3.1: profil u `config.yaml`, Claude API poziv po oglasu, `score` + obrazloženje, prag za slanje, sortiranje. Obrazloženje u poruci. Podešavanje praga na osnovu prvih nekoliko dana.
-**Zašto pre dodatnih izvora:** kvalitet po oglasu vredi više od količine kad je količina ionako mala.
+### Phase 2 — LLM ranking ✅ done
+Layer 2 from section 3.1: target roles in `config.yaml`, one Gemini API call per posting, `score` + reason, a send threshold, sorting. Reason included in the message. **Switched from the originally planned Claude API to Google Gemini** (free tier) since the user doesn't have Anthropic API credits — functionally equivalent for this use case, and free at this call volume.
 
-### Faza 2b — Dodatni izvori (~4–6h)
-Samo izvori koje je Faza 0.5 odobrila. Adapter arhitektura: svaki izvor je funkcija koja vraća standardizovan oglas — lako dodavanje/uklanjanje i izolovan debug kad jedan pukne. Grupisanje poruke po score-u, ne po izvoru.
+### Phase 2b — Additional sources ✅ done
+WeWorkRemotely, HelloWorld.rs, and Infostud, all wired in via `fetch_all_jobs()` in `main.py` with per-source failure isolation (if one adapter breaks, the others still run). Adapter architecture as planned: each source is a function returning a standardized posting.
 
-### Faza 3 — LinkedIn/Indeed pokrivenost + email (~4–5h)
-IMAP parsiranje job alert mejlova (primarno). SerpApi samo ako je Faza 0.5 dala zeleno svetlo. Email fallback za slanje + error alerting. Logging po izvoru (fetched / filtered / sent).
+**Found only during implementation, not part of the original plan:** the Gemini free tier's 15 requests/minute limit gets hit in practice once three-plus sources are combined (confirmed live: 33 Layer-1-passed postings in one run triggered a 429). `agent/llm.py` now retries automatically using Google's suggested wait time from the error response, rather than failing the run.
 
-### Faza 4 — Pouzdanost (~2–3h)
-"Zero results" alert kad izvor koji obično vraća rezultate vrati 0 (znak da je scraper pukao). Retry sa backoff-om. Nedeljni sažetak petkom. Podešavanje filtera na osnovu par nedelja realne upotrebe.
+### Phase 3 — LinkedIn/Indeed coverage + email (not started)
+IMAP parsing of job alert emails (primary). SerpApi only if it proves useful. Email fallback for sending + error alerting. Per-source logging (fetched / filtered / sent).
 
-### Faza 5 — Opciona proširenja
-- **Tracker prijava** (`applied` / `rejected` / `interview` / `no response`, sa datumima i podsetnikom za follow-up). Ovo je verovatno **veći dobitak od bilo kog dodatnog izvora** — najveći gubitak u traženju posla je nepraćenje ko je odgovorio i kada treba poslati follow-up.
+### Phase 4 — Reliability (not started)
+A "zero results" alert when a source that normally returns results returns 0 (a sign the scraper broke). Retry with backoff. Weekly summary on Fridays. Threshold/filter tuning based on real-world use.
+
+### Phase 5 — Optional extensions (not started)
+- **Application tracker** (`applied` / `rejected` / `interview` / `no response`, with dates and a follow-up reminder). Probably a **bigger win than any additional source** — the biggest loss in job searching is losing track of who responded and when a follow-up is due.
 - Web dashboard.
-- WhatsApp/Viber (samo ako se pojavi razlog).
+- WhatsApp/Viber (only if a concrete reason comes up).
 
 ---
 
-## 8. Rizici i mitigacija
+## 8. Risks and mitigation
 
-| Rizik | Mitigacija |
+| Risk | Mitigation |
 |---|---|
-| **Premalo oglasa uopšte postoji** za ovaj profil | Faza 0.5 to meri pre nego što se gradi; ako je izmereno vrlo malo → širi filter (Python/Data/general junior dev), ne više izvora |
-| **Keyword filter propušta relevantno** | Dvoslojna strategija (širok filter + LLM presuda) umesto strogih negativnih reči |
-| **Scraping blokiran** (IP ban, CAPTCHA) | 1x/dnevno, transparentan User-Agent, robots.txt, fallback na druge izvore, bez probijanja zaštite |
-| **HTML struktura se promeni** → scraper vraća 0 | Modularni adapteri + "zero results" alert (Faza 4) |
-| **API/servis menja format** (RemoteOK, NoFluffJobs) | Diversifikacija izvora + logging po izvoru |
-| **LinkedIn/Indeed ToS** | Job alert mejlovi umesto scraping-a; SerpApi samo kao sekundarna opcija |
-| **Merge konflikt / korupcija state fajla** | JSONL umesto binarnog SQLite-a; `concurrency` grupa; `pull --rebase` pre push-a |
-| **Duplikati između izvora** | Dvoključni dedup (`source_key` + `logical_key`) |
-| **Workflow se tiho ugasi posle 60 dana** | Proveriti pravilo u Fazi 0.5; ako važi → podsetnik za mesečni ručni trigger |
-| **Cron kasni / DST pomeranje** | Neparan minut u zakazivanju; prihvatiti ±sat, nebitno za dnevni digest |
-| **LLM trošak izmakne kontroli** | Sloj 1 ograničava broj poziva; dnevni cap na broj LLM poziva u `config.yaml`; jeftiniji model |
-| **Navikneš se da ignorišeš poruke** | Ne šalju se prazni digest-i; nedeljni sažetak umesto svakodnevnog šuma |
-| **Pravni/etički rizik** | Strogo lična upotreba, 1 primalac, bez redistribucije, spremnost da se izvor isključi na zahtev |
+| **Too few postings exist at all** for this profile | Measured in Phase 0.5 before building; if very low → widen the filter (Python/Data/general junior dev), not more sources |
+| **Keyword filter misses relevant postings** | Two-layer strategy (broad filter + LLM judgment) instead of strict negative keywords |
+| **Scraping gets blocked** (IP ban, CAPTCHA) | Once/day, transparent User-Agent, robots.txt respected, fallback to other sources, never bypassing protections |
+| **HTML structure changes** → scraper returns 0 | Modular adapters + per-source failure isolation (✅ implemented in Phase 2b) + "zero results" alert (Phase 4, not yet built) |
+| **API/service changes its format** (RemoteOK, etc.) | Source diversification + per-source logging |
+| **LinkedIn/Indeed ToS** | Job alert emails instead of scraping; SerpApi only as a secondary option |
+| **Merge conflict / state file corruption** | JSONL instead of binary SQLite; `concurrency` group; `pull --rebase` before push |
+| **Duplicates between sources** | Two-key dedup (`source_key` + `logical_key`) — ✅ confirmed working, including within a single source that lists the same posting under two different tag filters |
+| **Workflow silently dies after 60 days** | Not yet verified whether bot commits count as activity; monthly manual trigger as a fallback if it turns out to matter |
+| **Cron runs late / DST shift** | ✅ Confirmed worse than expected in practice — see section 6. Accepted as-is; a daily digest doesn't need precise timing |
+| **LLM cost gets out of control** | Layer 1 limits call volume; `max_calls_per_run` cap in `config.yaml`; free-tier model (Gemini) — cost risk replaced by a **rate-limit** risk instead, now handled with automatic retry |
+| **You get used to ignoring the messages** | No empty digests are sent; a weekly summary instead of daily noise (Phase 4, not yet built) |
+| **Legal/ethical risk** | Strictly personal use, 1 recipient, no redistribution, willing to disable a source on request |
 
 ---
 
-## Sledeći korak
+## Next step
 
-**Faza 0 + Faza 0.5.** Ti kreiraš i push-uješ GitHub repo (sekcija 0), podešavaš Telegram bota, zatim ručno izviđanje izvora — tek kad postoji izmerena tabela izvora kreće Faza 1 (RemoteOK + Telegram MVP).
+Phases 0 through 2b are done and live. The user is monitoring real-world output (starting the day after Phase 2b shipped) and will report back with feedback — likely candidates for the next round: tuning `llm.score_threshold` or the Layer 2 prompt criteria based on what turns out to be mis-scored, before moving on to Phase 3 (LinkedIn/Indeed via job alert emails) or Phase 4 (reliability / weekly summary).
