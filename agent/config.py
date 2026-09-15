@@ -32,3 +32,7 @@ def load_config() -> dict:
 
 def telegram_credentials() -> tuple[str, str]:
     return os.environ.get("TELEGRAM_BOT_TOKEN", ""), os.environ.get("TELEGRAM_CHAT_ID", "")
+
+
+def gemini_credentials() -> str:
+    return os.environ.get("GEMINI_API_KEY", "")

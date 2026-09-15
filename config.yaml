@@ -67,8 +67,9 @@ sources:
       reason: "nema zvaničnog javnog API-ja, direktan pristup blokiran"
 
 llm:
-  enabled: false  # uključuje se u Fazi 2
+  enabled: true
   score_threshold: 6
+  max_calls_per_run: 50  # sigurnosni limit troška (PLAN.md sekcija 8) — ne treba da se dostigne u normalnom radu
 
 notifications:
   telegram:

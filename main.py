@@ -15,10 +15,11 @@ if sys.platform == "win32":
         except (AttributeError, ValueError):
             pass
 
-from agent.config import load_config, telegram_credentials
+from agent.config import gemini_credentials, load_config, telegram_credentials
 from agent.dedup import append_records, load_seen, logical_key, source_key
 from agent.filters import matches_layer1
 from agent.format import format_digest
+from agent.llm import score_job
 from agent.sources import remoteok
 from agent.telegram import send_digest
 
@@ -57,7 +58,7 @@ def run() -> None:
 
     positive_keywords = config["filters"]["positive_keywords"]
     new_records: list[dict] = []
-    to_send: list[dict] = []
+    layer1_passed: list[dict] = []
 
     for job in raw_jobs:
         s_key = source_key(job["source"], job["url"])
@@ -80,11 +81,44 @@ def run() -> None:
             "sent_at": None,
         }
         if matched:
-            to_send.append(job)
             record["status"] = "sent_dry_run" if dry_run else "sent"
+            layer1_passed.append(record)
         new_records.append(record)
 
-    log.info("Novih oglasa: %d, prolazi Sloj 1 filter: %d", len(new_records), len(to_send))
+    log.info("Novih oglasa: %d, prolazi Sloj 1 filter: %d", len(new_records), len(layer1_passed))
+
+    to_send: list[dict] = layer1_passed
+
+    if config["llm"]["enabled"] and layer1_passed:
+        api_key = gemini_credentials()
+        if not api_key:
+            raise RuntimeError("GEMINI_API_KEY nije podešen (env ili GitHub Secrets).")
+
+        target_roles = config["profile"]["target_roles"]
+        threshold = config["llm"]["score_threshold"]
+        max_calls = config["llm"].get("max_calls_per_run", 50)
+
+        scorable = layer1_passed[:max_calls]
+        if len(layer1_passed) > max_calls:
+            log.warning(
+                "Sloj 1 je propustio %d oglasa, LLM ocenjuje samo prvih %d (max_calls_per_run) radi kontrole troška.",
+                len(layer1_passed),
+                max_calls,
+            )
+
+        for record in scorable:
+            score, reason = score_job(record, target_roles, api_key)
+            record["llm_score"] = score
+            record["llm_reason"] = reason
+            if score < threshold:
+                record["status"] = "filtered_llm"
+
+        to_send = sorted(
+            (r for r in layer1_passed if r["status"] in ("sent", "sent_dry_run")),
+            key=lambda r: r["llm_score"] or 0,
+            reverse=True,
+        )
+        log.info("LLM: %d ocenjeno, %d iznad praga (%d)", len(scorable), len(to_send), threshold)
 
     if to_send:
         digest = format_digest(to_send)
@@ -96,9 +130,8 @@ def run() -> None:
                 raise RuntimeError("TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID nisu podešeni (env ili GitHub Secrets).")
             send_digest(token, chat_id, digest)
             sent_at = datetime.now(timezone.utc).isoformat()
-            for record in new_records:
-                if record["status"] == "sent":
-                    record["sent_at"] = sent_at
+            for record in to_send:
+                record["sent_at"] = sent_at
     else:
         log.info("Nema novih oglasa koji prolaze filter — ništa se ne šalje.")
 

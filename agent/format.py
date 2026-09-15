@@ -20,11 +20,14 @@ def _age_str(posted_date: str | None) -> str:
 
 def format_job(job: dict) -> str:
     age = _age_str(job.get("posted_date"))
-    return (
-        f"🔹 <b>{job['title']}</b> — {job['company']}\n"
-        f"📍 {job['location']}  ·  🕒 {age}  ·  {job['source']}\n"
-        f"🔗 {job['url']}"
-    )
+    lines = [
+        f"🔹 <b>{job['title']}</b> — {job['company']}",
+        f"📍 {job['location']}  ·  🕒 {age}  ·  {job['source']}",
+    ]
+    if job.get("llm_reason"):
+        lines.append(f"💡 {job['llm_reason']}")
+    lines.append(f"🔗 {job['url']}")
+    return "\n".join(lines)
 
 
 def format_digest(jobs: list[dict]) -> str:
